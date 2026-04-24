@@ -27,7 +27,7 @@ docker-compose exec web pytest
 python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt && .venv/bin/pytest
 ```
 
-## Co se tam děje
+## Jak to funguje?
 
 ```
 erp_data.json → transform → delta (hash) → EshopClient → API
@@ -49,7 +49,7 @@ Rate limit (5 req/s) dělám ručně přes deque s timestampy, knihovna to
 preventivně neumí. Retry na 429 nechávám na `urllib3.Retry`, tu umí
 `Retry-After` nativně.
 
-## Pár voleb
+## Rozhodnutí
 
 **Hash, ne timestamp.** Vzorek ERP `updated_at` neposílá a hash navíc chytne
 i případ, kdy ERP pošle "update" beze změny.
