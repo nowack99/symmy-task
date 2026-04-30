@@ -94,3 +94,84 @@ def test_sync_uses_transformed_payload(erp_file):
     assert sku_a['price'] == 121.0  # 100 * 1.21
     assert sku_a['stock'] == 3
     assert sku_a['color'] == 'red'
+
+
+@pytest.mark.django_db
+def test_non_list_input_raises(tmp_path, settings):
+    path = tmp_path / 'erp.json'
+    path.write_text(json.dumps({"not": "a list"}))
+    settings.ERP_DATA_PATH = str(path)
+    with pytest.raises(ValueError, match='expected a list'):
+        sync_products()
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_invalid_count_is_reported(tmp_path, settings):
+    bad = [
+        {"id": "SKU-A", "title": "OK", "price_vat_excl": 100,
+         "stocks": {"a": 1}, "attributes": {}},
+        {"id": "SKU-B", "title": "negative price", "price_vat_excl": -50,
+         "stocks": {}, "attributes": {}},
+        {"id": "SKU-C", "title": "null price", "price_vat_excl": None,
+         "stocks": {}, "attributes": {}},
+    ]
+    path = tmp_path / 'erp.json'
+    path.write_text(json.dumps(bad))
+    settings.ESHOP_BASE_URL = BASE_URL
+    settings.ESHOP_API_KEY = 'k'
+    settings.ESHOP_RATE_LIMIT = 10
+    settings.ERP_DATA_PATH = str(path)
+
+    responses.add(responses.POST, f'{BASE_URL}/products/', json={}, status=201)
+    stats = sync_products()
+    assert stats['created'] == 1
+    assert stats['invalid'] == 2
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_invalid_records_are_logged_with_sample(tmp_path, settings, caplog):
+    import logging
+    bad = [
+        {"id": "SKU-A", "price_vat_excl": 100, "stocks": {}, "attributes": {}},
+        {"id": "SKU-B", "price_vat_excl": -1, "stocks": {}, "attributes": {}},
+        "not a dict at all",
+    ]
+    path = tmp_path / 'erp.json'
+    path.write_text(json.dumps(bad))
+    settings.ESHOP_BASE_URL = BASE_URL
+    settings.ESHOP_API_KEY = 'k'
+    settings.ESHOP_RATE_LIMIT = 10
+    settings.ERP_DATA_PATH = str(path)
+
+    responses.add(responses.POST, f'{BASE_URL}/products/', json={}, status=201)
+    with caplog.at_level(logging.WARNING, logger='integrator.tasks'):
+        sync_products()
+
+    warnings = [r for r in caplog.records if r.levelname == 'WARNING']
+    assert any('dropped 2 invalid records' in r.message for r in warnings)
+    assert any("'not a dict at all'" in r.message or 'not a dict at all' in r.message for r in warnings)
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_high_invalid_ratio_logs_critical(tmp_path, settings, caplog):
+    import logging
+    bad = [
+        {"id": "SKU-A", "price_vat_excl": 100, "stocks": {}, "attributes": {}},
+        {"id": "SKU-B", "price_vat_excl": -1, "stocks": {}, "attributes": {}},
+        {"id": "SKU-C", "price_vat_excl": None, "stocks": {}, "attributes": {}},
+    ]
+    path = tmp_path / 'erp.json'
+    path.write_text(json.dumps(bad))
+    settings.ESHOP_BASE_URL = BASE_URL
+    settings.ESHOP_API_KEY = 'k'
+    settings.ESHOP_RATE_LIMIT = 10
+    settings.ERP_DATA_PATH = str(path)
+
+    responses.add(responses.POST, f'{BASE_URL}/products/', json={}, status=201)
+    with caplog.at_level(logging.CRITICAL, logger='integrator.tasks'):
+        sync_products()
+
+    assert any('exceeds 10% threshold' in r.message for r in caplog.records)

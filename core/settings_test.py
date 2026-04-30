@@ -6,3 +6,5 @@ DATABASES = {
         'NAME': ':memory:',
     }
 }
+
+LOGGING['loggers']['integrator']['propagate'] = True  # noqa: F405
